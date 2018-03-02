@@ -48,12 +48,12 @@ nlp = spacy.load("en", disable=['parser', 'tagger', 'ner'])
 stops = stopwords.words("english")
 
 
-def normalize(comment, lowercase=True, remove_stopwords=True):
+def normalize(text, lowercase=True, remove_stopwords=True):
     if lowercase:
-        comment = comment.lower()
-    comment = nlp(comment)
+        text = text.lower()
+    text = nlp(text)
     lemmatized = list()
-    for word in comment:
+    for word in text:
         lemma = word.lemma_.strip()
         if lemma:
             if not remove_stopwords or (remove_stopwords and lemma not in stops):
