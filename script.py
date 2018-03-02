@@ -117,7 +117,6 @@ def load_data(filename):
     print('removed rare words')
     return df
 
-
 def main():
     print('loading data')
     train_df = load_data('train.csv')
