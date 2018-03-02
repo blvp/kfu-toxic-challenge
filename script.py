@@ -1,4 +1,4 @@
-import re
+import re, os
 from collections import namedtuple
 from typing import NamedTuple
 
@@ -12,6 +12,7 @@ from sklearn.model_selection import train_test_split
 
 
 def cleaned(content):
+    content = content.lower()
     # First remove inline JavaScript/CSS:
     cleaned_content = re.sub(r"(?is)<(script|style).*?>.*?(</\1>)", "", content)
     # Then remove html comments.
@@ -38,7 +39,8 @@ def cleaned(content):
     cleaned_content = re.sub(r"\s{2,}", " ", cleaned_content)
     cleaned_content = re.sub(r"\d+", "", cleaned_content)
     cleaned_content = re.sub(r"[\r\n]+", " ", cleaned_content)
-    return cleaned_content.strip().lower()
+    cleaned_content = re.sub(r'^(https|http)?://.*[\r\n]*', '', cleaned_content)
+    return cleaned_content.strip()
 
 
 def space_tokenizer(w):
@@ -60,7 +62,7 @@ DataSet = namedtuple('DataSet', ['x', 'y'])
 
 def load_data():
     # comment_text, labels...
-    df = pd.read_csv('data/train.csv')[:10000]
+    df = pd.read_csv(os.path.join('data', 'train.csv'))
     tf_idf = TfidfVectorizer(
         stop_words='english',
         tokenizer=space_tokenizer,
