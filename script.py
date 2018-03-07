@@ -1,8 +1,10 @@
 import os
 import re
+import sys
 from collections import namedtuple, Counter
 from multiprocessing.pool import Pool
 
+import datetime
 import numpy as np
 import pandas as pd
 import spacy
@@ -10,6 +12,10 @@ import tflearn
 from nltk.corpus import stopwords
 from nltk.tokenize import wordpunct_tokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import train_test_split
+from tqdm import tqdm
+import tensorflow as tf
+from tensorflow.contrib.layers.python.layers.initializers import xavier_initializer
 
 
 def cleaned(content):
@@ -113,9 +119,16 @@ def load_data(filename):
     df = pd.read_csv(os.path.join('data', filename))
     df = parallelize_dataframe(df, cleanup_dataframe)
     print('cleaned text data')
-    df = remove_rare_words(df, min_count=4)
-    print('removed rare words')
     return df
+
+
+def batchify(x, y, batch_size=64):
+    nsamples = x.shape[0]
+    index = 0
+    for offset in range(0, nsamples, batch_size):
+        yield index, x[offset: batch_size + offset], y[offset: batch_size + offset]
+        index += 1
+
 
 def main():
     print('loading data')
@@ -126,26 +139,73 @@ def main():
         preprocessor=None,
         sublinear_tf=True,
         use_idf=False,
-        lowercase=True
+        lowercase=True,
+        min_df=4
     )
     documents = tf_idf.fit_transform(train_df['comment_text'])
     labels = train_df.drop(['id', 'comment_text'], axis=1)
-    # train_x, test_x, train_y, test_y = train_test_split(documents, labels, test_size=0.3)
-    dataset = DataSet(np.array(documents.toarray()), np.array(labels))
+    train_x, test_x, train_y, test_y = train_test_split(documents, labels, test_size=0.3)
+    test_x = np.array(test_x.toarray())
     vocab_size = len(tf_idf.vocabulary_)
-
+    batch_size = 64
+    learning_rate = 0.01
+    epochs = 10
     nclasses = 6
-    net = get_network(vocab_size, nclasses)
-    model = tflearn.DNN(net, tensorboard_verbose=1, tensorboard_dir='logs/experiment')
-    print('model ready. start fitting the model')
-    model.fit(dataset.x, dataset.y,
-              n_epoch=10,
-              validation_set=0.3,
-              show_metric=True,
-              batch_size=64,
-              shuffle=True,
-              run_id='bow_logits'
-              )
+    graph = tf.Graph()
+    with graph.as_default():
+        initializer = xavier_initializer(dtype=tf.float32)
+        x = tf.placeholder(tf.float32, [None, vocab_size], 'input')
+        y = tf.placeholder(tf.float32, [None, nclasses], 'input_labels')
+        h1 = tf.Variable(initializer([vocab_size, nclasses]), name='hidden1')
+        b1 = tf.Variable(tf.random_uniform([nclasses]), name='bias1')
+        y_pred = x * h1 + b1
+        loss = tf.losses.sigmoid_cross_entropy(y, y_pred, label_smoothing=1)
+        tf.summary.scalar('loss', loss)
+        optimizer = tf.train.AdagradOptimizer(learning_rate).minimize(loss)
+
+        with tf.Session(graph).as_default() as sess:
+            merged = tf.summary.merge_all()
+            batch_writer = tf.summary.FileWriter('./logs/batch')
+            epoch_writer = tf.summary.FileWriter('./logs/epoch')
+            tf.initialize_all_variables().run()
+            total = train_x.shape[0] / batch_size
+            for epoch in range(epochs):
+                # shuffle(self.batches)
+                print("Batches shuffled")
+                print("-----------------")
+                sys.stdout.flush()
+                accumulated_loss = 0
+                num_batches = total / batch_size
+                for batch_index, input_x, input_y in batchify(train_x, train_y, batch_size=batch_size):
+                    feed_dict = {
+                        x: np.array(input_x),
+                        y: np.array(input_y)
+                    }
+                    summaries, _, total_loss_, = sess.run(
+                        [merged, optimizer, loss], feed_dict=feed_dict
+                    )
+                    accumulated_loss += total_loss_
+                    print("epoch: {0}/{1}".format(epoch + 1, epochs))
+                    print("batch: {0}/{1}".format(batch_index + 1, num_batches))
+                    print("average loss: {}".format(accumulated_loss / 100))
+                    print("-----------------")
+                    batch_writer.add_summary(summaries, epoch * num_batches + batch_index)
+                    sys.stdout.flush()
+                    accumulated_loss = 0
+
+                summaries, epoch_test_loss, = sess.run(
+                    [merged, loss], feed_dict={
+                        x: test_x,
+                        y: test_y
+                    }
+                )
+                epoch_writer.add_summary(summaries, epoch)
+                print("epoch: {0}/{1}".format(epoch + 1, epochs))
+                print("val loss: {}".format(epoch_test_loss))
+                print("-----------------")
+                sys.stdout.flush()
+                print("Epoch finished: {}".format(datetime.datetime.now().time()))
+                print("=================")
 
 
 if __name__ == '__main__':
