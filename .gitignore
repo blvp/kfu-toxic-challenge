@@ -1,4 +1,7 @@
 .idea
 *.pyc
 data/*.csv
+data/
 logs/
+.DS_Store
+.ipynb_checkpoints/
